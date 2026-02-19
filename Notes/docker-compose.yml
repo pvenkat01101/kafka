@@ -1,0 +1,78 @@
+# docker-compose.yml
+# This file describes a set of containers (services) that Docker will run together.
+# In our case: a single Kafka broker running in KRaft mode (no ZooKeeper).
+
+services:
+  kafka:
+    # The Docker image to use.
+    # This is the official Apache Kafka image maintained by the Kafka project.
+    image: apache/kafka:latest
+
+    # Just a human-friendly name for the container.
+    container_name: kafka
+
+    ports:
+      # Map container port 9092 to your Mac's port 9092.
+      # This is how programs running on your Mac will connect to Kafka.
+      - "9092:9092"
+
+      # Map port 9093 as well (used internally by Kafka's controller in KRaft mode).
+      - "9093:9093"
+
+    environment:
+      # Tell Kafka that this node acts as BOTH:
+      # - a broker (stores data, serves producers/consumers)
+      # - a controller (manages metadata and leadership)
+      # This is called "KRaft combined mode" and is perfect for local dev.
+      KAFKA_PROCESS_ROLES: "broker,controller"
+
+      # Every node in a Kafka cluster has a unique numeric ID.
+      # Since we have only one node, we use 1.
+      KAFKA_NODE_ID: "1"
+
+      # Name of the listener used for controller-to-controller communication.
+      # Even in single-node mode, Kafka still needs this.
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      # Define all network endpoints Kafka will listen on.
+      # PLAINTEXT://:9092   -> for producers/consumers
+      # CONTROLLER://:9093  -> for internal controller communication
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+
+      # This is the address Kafka tells clients to use to reach it.
+      # Since you are connecting from your Mac, we advertise "localhost:9092".
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
+
+      # This tells Kafka where the controller quorum lives.
+      # Format: nodeId@host:port
+      # Here: node 1 is at host "kafka" (container name) port 9093.
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+
+      # ---- The following settings are REQUIRED for single-node Kafka ----
+      # Normally Kafka expects multiple replicas. But we only have one broker.
+
+      # The internal offsets topic (for consumer groups) will have replication factor 1.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+
+      # The internal transaction state log (for exactly-once semantics).
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+
+      # Minimum in-sync replicas for transaction state.
+      # Must be 1 for single-node, or Kafka will refuse to start.
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+
+      # This removes the default rebalance delay so consumer groups start immediately.
+      # Good for local development.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+
+    volumes:
+      # This creates a persistent volume so Kafka data is not lost
+      # when you stop or restart the container.
+      # Kafka stores all partition logs here.
+      - kafka-data:/var/lib/kafka/data
+
+# Define named volumes used by services
+volumes:
+  kafka-data:
+    # Docker will manage this volume automatically.
+    # It lives outside the container lifecycle.

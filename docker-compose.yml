@@ -1,78 +1,134 @@
-# docker-compose.yml
-# This file describes a set of containers (services) that Docker will run together.
-# In our case: a single Kafka broker running in KRaft mode (no ZooKeeper).
+# docker-compose.yml - Kafka Setup with Schema Registry and Kafka UI
+# This file defines Docker containers for Kafka messaging, Schema Registry for Avro schemas, and Kafka UI for monitoring
 
+# Specifies the Docker Compose version being used (3.8 is compatible with most Docker versions)
+version: '3.8'
+
+# All services (containers) that will be created and run together
 services:
+  # ============================================
+  # KAFKA BROKER - The main message queue server
+  # ============================================
   kafka:
-    # The Docker image to use.
-    # This is the official Apache Kafka image maintained by the Kafka project.
-    image: apache/kafka:latest
-
-    # Just a human-friendly name for the container.
+    # The pre-built Kafka Docker image from Confluent (includes Kafka 7.6.0)
+    image: confluentinc/cp-kafka:7.6.0
+    # Internal Docker network hostname - used by other containers to connect to Kafka
+    hostname: kafka
+    # Unique name for this container instance
     container_name: kafka
-
+    # Port mappings: format is "HOST_PORT:CONTAINER_PORT"
+    # External port (on your machine) : Internal port (inside container)
     ports:
-      # Map container port 9092 to your Mac's port 9092.
-      # This is how programs running on your Mac will connect to Kafka.
+      # 9092: Standard Kafka broker port - used by clients outside Docker to connect
       - "9092:9092"
-
-      # Map port 9093 as well (used internally by Kafka's controller in KRaft mode).
-      - "9093:9093"
-
+      # 29093: Controller listener port - used for internal Kafka cluster communication (KRaft mode)
+      - "29093:29093"
+      # 9101: JMX monitoring port - for monitoring Kafka broker metrics
+      - "9101:9101"
+    # Environment variables passed to the Kafka container for configuration
     environment:
-      # Tell Kafka that this node acts as BOTH:
-      # - a broker (stores data, serves producers/consumers)
-      # - a controller (manages metadata and leadership)
-      # This is called "KRaft combined mode" and is perfect for local dev.
-      KAFKA_PROCESS_ROLES: "broker,controller"
-
-      # Every node in a Kafka cluster has a unique numeric ID.
-      # Since we have only one node, we use 1.
-      KAFKA_NODE_ID: "1"
-
-      # Name of the listener used for controller-to-controller communication.
-      # Even in single-node mode, Kafka still needs this.
-      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-
-      # Define all network endpoints Kafka will listen on.
-      # PLAINTEXT://:9092   -> for producers/consumers
-      # CONTROLLER://:9093  -> for internal controller communication
-      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-
-      # This is the address Kafka tells clients to use to reach it.
-      # Since you are connecting from your Mac, we advertise "localhost:9092".
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
-
-      # This tells Kafka where the controller quorum lives.
-      # Format: nodeId@host:port
-      # Here: node 1 is at host "kafka" (container name) port 9093.
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-
-      # ---- The following settings are REQUIRED for single-node Kafka ----
-      # Normally Kafka expects multiple replicas. But we only have one broker.
-
-      # The internal offsets topic (for consumer groups) will have replication factor 1.
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-
-      # The internal transaction state log (for exactly-once semantics).
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
-
-      # Minimum in-sync replicas for transaction state.
-      # Must be 1 for single-node, or Kafka will refuse to start.
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-
-      # This removes the default rebalance delay so consumer groups start immediately.
-      # Good for local development.
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-
+      # Node ID uniquely identifies this Kafka broker in the cluster (must be unique)
+      KAFKA_NODE_ID: 1
+      # Maps listener names to security protocols - defines how different clients connect
+      # CONTROLLER: inter-broker communication protocol
+      # PLAINTEXT: regular clients connecting internally
+      # PLAINTEXT_HOST: clients connecting from outside Docker network
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      # Advertised listeners tell clients how to connect to this broker
+      # PLAINTEXT: internal Docker network address for inter-broker communication
+      # PLAINTEXT_HOST: external address for connecting from your machine
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      # Number of replica brokers for the offsets topic (1 for single-broker setup)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Delay before consumer groups start rebalancing (0 = immediate, useful for testing)
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Minimum in-sync replicas for transaction state topic (1 for single-broker setup)
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Replication factor for transaction state log (1 for single-broker setup)
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # JMX (Java Management Extensions) port for monitoring and managing Kafka
+      KAFKA_JMX_PORT: 9101
+      # JMX hostname - where monitoring tools can connect to
+      KAFKA_JMX_HOSTNAME: localhost
+      # KRaft mode roles: 'broker' handles client requests, 'controller' manages cluster coordination
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      # Specifies which broker nodes are part of the controller quorum (for cluster coordination)
+      # Format: NODE_ID@HOSTNAME:PORT - this single-broker cluster has node 1 as controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      # All listener endpoints this broker listens on
+      # PLAINTEXT: internal Docker network communication (port 29092)
+      # CONTROLLER: KRaft controller port (port 29093) - for cluster coordination
+      # PLAINTEXT_HOST: external client connections (port 9092)
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      # Which listener is used for broker-to-broker communication within the cluster
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      # Which listener is used for KRaft controller communication
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      # Unique cluster identifier for KRaft mode (generated, used for cluster identification)
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    # Persistent storage volumes for Kafka data (survives container restarts)
     volumes:
-      # This creates a persistent volume so Kafka data is not lost
-      # when you stop or restart the container.
-      # Kafka stores all partition logs here.
+      # Maps Docker volume 'kafka-data' to Kafka's data directory in the container
+      # Data persists between container stop/start cycles
       - kafka-data:/var/lib/kafka/data
 
-# Define named volumes used by services
+  # ============================================
+  # SCHEMA REGISTRY - Manages Avro schemas for data validation
+  # ============================================
+  schema-registry:
+    # Pre-built Schema Registry Docker image from Confluent (version 7.6.0)
+    image: confluentinc/cp-schema-registry:7.6.0
+    # Internal Docker network hostname - used by other containers to connect
+    hostname: schema-registry
+    # Unique name for this container instance
+    container_name: schema-registry
+    # This service depends on Kafka - Docker will start Kafka first before this service
+    depends_on:
+      - kafka
+    # Port mappings for Schema Registry
+    ports:
+      # 8081: Standard Schema Registry REST API port - used by producers/consumers and applications
+      - "8081:8081"
+    # Environment variables for Schema Registry configuration
+    environment:
+      # The hostname this service uses to identify itself on the network
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      # Bootstrap server address - where Schema Registry connects to Kafka for storing schemas
+      # 29092 is the internal Docker network port (not accessible from outside)
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:29092'
+      # REST API listener configuration - listens on all network interfaces (0.0.0.0) on port 8081
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  # ============================================
+  # KAFKA UI - Web dashboard for monitoring Kafka
+  # ============================================
+  kafka-ui:
+    # Kafka UI image from Provectus (provides visual monitoring of topics, messages, clusters)
+    image: provectuslabs/kafka-ui:latest
+    # Unique name for this container instance
+    container_name: kafka-ui
+    # Port mappings for the web UI
+    ports:
+      # 8080: Web interface port - access the dashboard at http://localhost:8080 in your browser
+      - "8080:8080"
+    # Environment variables for Kafka UI configuration
+    environment:
+      # User-defined name for this Kafka cluster in the UI
+      KAFKA_CLUSTERS_0_NAME: local
+      # Bootstrap servers address - where Kafka UI connects to the Kafka broker
+      # 29092 is the internal Docker network address
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # Schema Registry URL - allows Kafka UI to display and decode Avro schemas
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    # This service depends on both Kafka and Schema Registry
+    # Docker will start both dependencies before starting Kafka UI
+    depends_on:
+      - kafka
+      - schema-registry
+
+# Persistent storage volumes shared across containers
 volumes:
+  # Named volume for Kafka data persistence
+  # All Kafka data (topics, partitions, messages) is stored here
+  # This allows data to survive container restarts/rebuilds
   kafka-data:
-    # Docker will manage this volume automatically.
-    # It lives outside the container lifecycle.
